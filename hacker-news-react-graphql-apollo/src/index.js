@@ -16,6 +16,13 @@ import { BrowserRouter } from 'react-router-dom';
 import { setContext } from 'apollo-link-context';
 import { AUTH_TOKEN } from './constants';
 
+// FOR SUBSCRIPTIONS
+// make sure your ApolloClient instance knows about the subscription server.
+
+import { split } from 'apollo-link';
+import { WebSocketLink } from 'apollo-link-ws';
+import { getMainDefinition } from 'apollo-utilities';
+
 // Here you create the httpLink that will connect your ApolloClient instance with the GraphQL API, your GraphQL server will be running on http://localhost:4000.
 
 const httpLink = createHttpLink({
@@ -34,12 +41,43 @@ const authLink = setContext((_, { headers }) => {
     }
   };
 });
+
+// --------
+// FOR SUBSCRIPTIONS
+// You’re instantiating a WebSocketLink that knows the subscriptions endpoint. The subscriptions endpoint in this case is similar to the HTTP endpoint, except that it uses the ws instead of http protocol. Notice that you’re also authenticating the websocket connection with the user’s token that you retrieve from localStorage.
+const wsLink = new WebSocketLink({
+  uri: `ws://localhost:4000`,
+  options: {
+    reconnect: true,
+    connectionParams: {
+      authToken: localStorage.getItem(AUTH_TOKEN)
+    }
+  }
+});
+
+// split is used to “route” a request to a specific middleware link. It takes three arguments, the first one is a test function which returns a boolean. The remaining two arguments are again of type ApolloLink. If test returns true, the request will be forwarded to the link passed as the second argument. If false, to the third one.
+// In your case, the test function is checking whether the requested operation is a subscription. If this is the case, it will be forwarded to the wsLink, otherwise (if it’s a query or mutation), the authLink.concat(httpLink) will take care of it:
+
+const link = split(
+  ({ query }) => {
+    const { kind, operation } = getMainDefinition(query);
+    return kind === 'OperationDefinition' && operation === 'subscription';
+  },
+  wsLink,
+  authLink.concat(httpLink)
+);
+
 // Now you instantiate ApolloClient by passing in the httpLink and a new instance of an InMemoryCache.
 const client = new ApolloClient({
   // link: httpLink,
-  link: authLink.concat(httpLink),
+  // link: authLink.concat(httpLink),
+  // for subscritions update
+  link,
   cache: new InMemoryCache()
 });
+
+// FOR SUBSCRIPTIONS
+// Now create a new WebSocketLink that represents the WebSocket connection. Use split for proper “routing” of the requests and update the constructor call of ApolloClient like so:
 
 // ReactDOM.render(<App />, document.getElementById('root'));
 
